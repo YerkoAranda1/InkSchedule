@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>InkSchedule</title>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+    <main class="hero">
+        <h1>Ink<span>Schedule</span></h1>
+        <p>Descubre tatuadores, mira cómo trabajan y cotiza tu próximo tatuaje en minutos.</p>
+        <div class="hero-actions">
+            <a class="btn-primary" href="feed.html">Ver el feed</a>
+            <button class="btn-outline" id="hero-login" onclick="openAuth('login')">Iniciar sesión</button>
+        </div>
+    </main>
+
+    <script src="auth.js"></script>
+    <script>
+        // Ajusta el botón secundario según la sesión
+        document.addEventListener('DOMContentLoaded', () => {
+            const btn = $('hero-login');
+            if (localStorage.getItem('ink_token')) {
+                btn.textContent = 'Ir a mi panel';
+                btn.onclick = () => { location.href = 'dashboard.html'; };
+            } else if (localStorage.getItem('client_token')) {
+                btn.textContent = 'Cerrar sesión';
+                btn.onclick = cerrarSesion;
+            }
+        });
+    </script>
+</body>
+</html>

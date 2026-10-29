@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>InkSchedule | Feed de tatuadores</title>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+    <header>
+        <a class="brand" href="index.html">Ink<span>Schedule</span></a>
+        <div class="header-links">
+            <span id="nav-status" class="nav-link" style="display: none; color: var(--accent-hover);"></span>
+            <a id="nav-panel" class="nav-link" href="dashboard.html" style="display: none;">Mi panel</a>
+            <span id="nav-logout" class="nav-link" style="display: none;" onclick="cerrarSesion()">Cerrar sesión</span>
+            <span id="nav-login" class="nav-link" onclick="openAuth('login')">Ingresar</span>
+        </div>
+    </header>
+
+    <div class="container">
+        <!-- Feed de artistas -->
+        <section id="feed-section">
+            <h2 class="section-title">Encuentra a tu <span>artista</span> ideal</h2>
+            <div class="feed-grid" id="artist-grid">
+                <p class="muted" style="text-align: center; grid-column: 1 / -1;">Cargando directorio...</p>
+            </div>
+        </section>
+
+        <!-- Formulario de cotización -->
+        <section id="quote-section" class="card">
+            <h2 id="selected-artist-name" style="color: var(--accent-hover); margin-top: 0;">Cotizar con...</h2>
+            <input type="text" id="style" placeholder="Estilo (ej. Realismo, Tradicional)">
+            <input type="number" id="size_cm" placeholder="Tamaño en cm" min="1">
+            <select id="body_part">
+                <option value="" disabled selected>Zona del cuerpo</option>
+                <option value="brazo">Brazo</option>
+                <option value="pierna">Pierna</option>
+                <option value="espalda">Espalda</option>
+                <option value="costillas">Costillas</option>
+                <option value="cuello">Cuello</option>
+            </select>
+            <label class="check-row">
+                <input type="checkbox" id="is_color"> Tatuaje a color
+            </label>
+            <button class="btn-primary" onclick="enviarCotizacion()">Calcular presupuesto</button>
+            <div style="text-align: center;">
+                <button class="btn-secondary" onclick="volverAlFeed()">Volver al directorio</button>
+            </div>
+            <div id="result-box"></div>
+        </section>
+    </div>
+
+    <!-- Visor de fotos de portafolio -->
+    <div id="lightbox"><img id="lightbox-img" alt=""></div>
+
+    <script src="auth.js"></script>
+    <script>
+        let currentArtistId = null;
+
+        document.addEventListener('DOMContentLoaded', () => {
+            cargarDirectorio();
+            // Un solo listener para los botones "Cotizar" y las fotos (sin meter datos en onclick)
+            $('artist-grid').addEventListener('click', e => {
+                const pic = e.target.closest('[data-full]');
+                if (pic) { abrirLightbox(pic.dataset.full); return; }
+
+                const btn = e.target.closest('[data-artist-id]');
+                if (btn) intentarCotizar(btn.dataset.artistId, btn.dataset.artistName);
+            });
+
+            $('lightbox').addEventListener('click', cerrarLightbox);
+            document.addEventListener('keydown', e => { if (e.key === 'Escape') cerrarLightbox(); });
+        });
+
+        // Lo llama auth.js cuando un cliente inicia sesión desde el modal
+        window.onClientLogin = function () {
+            renderSessionNav();
+            if (currentArtistId) mostrarFormulario();
+        };
+
+        async function cargarDirectorio() {
+            const grid = $('artist-grid');
+            try {
+                const res = await fetch(`${API}/artists/`);
+                if (!res.ok) throw new Error('http');
+                const data = await res.json();
+
+                if (data.length === 0) {
+                    grid.innerHTML = '<p class="muted" style="text-align: center; grid-column: 1 / -1;">No hay artistas registrados aún.</p>';
+                    return;
+                }
+
+                grid.innerHTML = data.map(artist => {
+                    // Hasta 3 fotos por tarjeta; clic para ampliar
+                    const pics = (artist.portfolio || []).slice(0, 3);
+                    const gallery = pics.length
+                        ? `<div class="gallery">${pics.map(p =>
+                            `<img src="${esc(p.image)}" alt="${esc(p.style)}" data-full="${esc(p.image)}" loading="lazy">`
+                          ).join('')}</div>`
+                        : '<p class="gallery-empty">Aún sin fotos de trabajos.</p>';
+
+                    return `
+                        <div class="card">
+                            <h3>${esc(artist.username)}</h3>
+                            <div class="rate-badge">Desde $${esc(artist.base_rate)} CLP</div>
+                            ${gallery}
+                            <p class="muted" style="margin: 0 0 20px;">${esc(artist.bio || 'Especialista en tinta.')}</p>
+                            <button class="btn-primary" data-artist-id="${esc(artist.id)}" data-artist-name="${esc(artist.username)}">Cotizar proyecto</button>
+                        </div>`;
+                }).join('');
+            } catch (err) {
+                grid.innerHTML = '<p class="muted" style="text-align: center; grid-column: 1 / -1;">No se pudo cargar el directorio. ¿Está corriendo el backend?</p>';
+            }
+        }
+
+        function abrirLightbox(src) {
+            $('lightbox-img').src = src;
+            $('lightbox').style.display = 'flex';
+        }
+
+        function cerrarLightbox() {
+            $('lightbox').style.display = 'none';
+        }
+
+        function intentarCotizar(artistId, artistName) {
+            currentArtistId = artistId;
+            $('selected-artist-name').textContent = `Cotizar con ${artistName}`;
+
+            if (!localStorage.getItem('client_token')) {
+                openAuth('register');
+            } else {
+                mostrarFormulario();
+            }
+        }
+
+        function mostrarFormulario() {
+            closeAuth();
+            $('feed-section').style.display = 'none';
+            $('quote-section').style.display = 'block';
+            $('result-box').style.display = 'none';
+        }
+
+        function volverAlFeed() {
+            $('quote-section').style.display = 'none';
+            $('feed-section').style.display = 'block';
+        }
+
+        async function enviarCotizacion() {
+            const box = $('result-box');
+            const style = $('style').value.trim();
+            const size = parseInt($('size_cm').value);
+            const part = $('body_part').value;
+
+            const showBox = html => { box.style.display = 'block'; box.innerHTML = html; };
+
+            if (!style || !size || !part) {
+                showBox('<p style="margin: 0; color: var(--danger);">Completa estilo, tamaño y zona del cuerpo.</p>');
+                return;
+            }
+
+            try {
+                const res = await fetch(`${API}/quotes/`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Token ' + localStorage.getItem('client_token')
+                    },
+                    body: JSON.stringify({
+                        artist: currentArtistId,
+                        style: style,
+                        size_cm: size,
+                        body_part: part,
+                        is_color: $('is_color').checked
+                    })
+                });
+
+                if (res.status === 401) {
+                    ['client_token', 'client_name'].forEach(k => localStorage.removeItem(k));
+                    renderSessionNav();
+                    showBox('<p style="margin: 0; color: var(--danger);">Tu sesión expiró. Inicia sesión de nuevo.</p>');
+                    return;
+                }
+                if (!res.ok) throw new Error('http');
+
+                const data = await res.json();
+                showBox(`
+                    <h3 style="color: var(--ok); margin-top: 0;">¡Solicitud enviada!</h3>
+                    <p>Rango estimado: <strong>$${esc(data.min_estimate)} - $${esc(data.max_estimate)} CLP</strong></p>
+                    <p class="muted" style="margin-bottom: 0;">El artista revisará los detalles en su panel y se pondrá en contacto contigo.</p>
+                `);
+            } catch (err) {
+                showBox('<p style="margin: 0; color: var(--danger);">Hubo un problema al enviar la solicitud.</p>');
+            }
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>InkSchedule | Panel del artista</title>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+    <header>
+        <a class="brand" href="index.html">Ink<span>Schedule</span></a>
+        <div class="header-links">
+            <a class="nav-link" href="feed.html">Ver feed</a>
+            <button class="btn-outline" style="padding: 8px 18px;" onclick="cerrarSesion()">Cerrar sesión</button>
+        </div>
+    </header>
+
+    <div class="container panel" id="dashboard-view" style="display: none;">
+        <h2 class="section-title">Tu <span>panel</span></h2>
+
+        <div class="tabs">
+            <button class="tab active" id="tab-btn-quotes" onclick="cambiarTab('quotes')">Cotizaciones</button>
+            <button class="tab" id="tab-btn-portfolio" onclick="cambiarTab('portfolio')">Mi portafolio</button>
+        </div>
+
+        <!-- Pestaña: cotizaciones -->
+        <section id="tab-quotes">
+            <div id="quotes-list" class="muted" style="text-align: center;">Cargando cotizaciones...</div>
+        </section>
+
+        <!-- Pestaña: portafolio -->
+        <section id="tab-portfolio" style="display: none;">
+            <div class="card upload-box">
+                <h3 style="margin-top: 0;">Subir foto de un trabajo</h3>
+                <input type="file" id="pf_file" accept="image/jpeg,image/png,image/webp">
+                <input type="text" id="pf_style" placeholder="Estilo (ej. Realismo, Minimalista)" maxlength="50">
+                <select id="pf_body">
+                    <option value="" disabled selected>Zona del cuerpo</option>
+                    <option value="brazo">Brazo</option>
+                    <option value="pierna">Pierna</option>
+                    <option value="espalda">Espalda</option>
+                    <option value="costillas">Costillas</option>
+                    <option value="cuello">Cuello</option>
+                </select>
+                <button class="btn-primary" id="pf-btn" onclick="subirFoto()">Subir foto</button>
+                <p id="pf-msg" class="error-msg" style="margin: 12px 0 0;"></p>
+                <p class="muted" style="margin: 10px 0 0; font-size: 12px;">JPG, PNG o WebP, máximo 5 MB.</p>
+            </div>
+            <div id="portfolio-grid" class="portfolio-grid"></div>
+        </section>
+    </div>
+
+    <script>
+        const API = 'http://localhost:8000/api';
+        const MAX_MB = 5;
+        const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+        const $ = id => document.getElementById(id);
+        const authHeader = () => ({ 'Authorization': 'Token ' + localStorage.getItem('ink_token') });
+
+        function esc(value) {
+            return String(value ?? '').replace(/[&<>"']/g, c => (
+                { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+            ));
+        }
+
+        const STATUS = {
+            PENDING:  { text: 'Pendiente',    color: 'var(--warn)' },
+            APPROVED: { text: 'Aprobado',     color: 'var(--ok)' },
+            REJECTED: { text: 'Rechazado',    color: 'var(--danger)' },
+            PAID:     { text: 'Abono pagado', color: 'var(--info)' }
+        };
+
+        // Ruta protegida: sin token de artista, de vuelta a la portada
+        window.onload = function () {
+            if (!localStorage.getItem('ink_token')) {
+                window.location.href = 'index.html';
+                return;
+            }
+            $('dashboard-view').style.display = 'block';
+            cargarCotizaciones();
+        };
+
+        function cambiarTab(name) {
+            ['quotes', 'portfolio'].forEach(t => {
+                $('tab-' + t).style.display = (t === name) ? 'block' : 'none';
+                $('tab-btn-' + t).classList.toggle('active', t === name);
+            });
+            if (name === 'portfolio') cargarPortafolio();
+        }
+
+        /* ---------------- Cotizaciones ---------------- */
+
+        async function cargarCotizaciones() {
+            const listDiv = $('quotes-list');
+            try {
+                const res = await fetch(`${API}/quotes/`, { headers: authHeader() });
+
+                if (res.status === 401) { cerrarSesion(); return; }
+                if (!res.ok) throw new Error('http');
+
+                const data = await res.json();
+                if (data.length === 0) {
+                    listDiv.textContent = 'No tienes cotizaciones nuevas.';
+                    return;
+                }
+
+                listDiv.style.textAlign = 'left';
+                listDiv.innerHTML = data.map(renderQuote).join('');
+            } catch (err) {
+                listDiv.textContent = 'Error al cargar cotizaciones.';
+            }
+        }
+
+        function renderQuote(quote) {
+            const st = STATUS[quote.status] || { text: quote.status, color: 'var(--muted)' };
+            let actions = '';
+
+            if (quote.status === 'PENDING') {
+                actions = `
+                    <div class="quote-actions">
+                        <button class="btn-primary btn-ok" onclick="actualizarEstado(${Number(quote.id)}, 'APPROVED')">Aprobar presupuesto</button>
+                        <button class="btn-primary btn-danger" onclick="actualizarEstado(${Number(quote.id)}, 'REJECTED')">Rechazar</button>
+                    </div>`;
+            } else if (quote.status === 'APPROVED' || quote.status === 'REJECTED') {
+                actions = `
+                    <div style="margin-top: 10px; text-align: right;">
+                        <button class="undo-link" onclick="actualizarEstado(${Number(quote.id)}, 'PENDING')">Deshacer acción</button>
+                    </div>`;
+            }
+
+            return `
+                <div class="quote-card">
+                    <h3>${esc(quote.client_name)} - ${esc(quote.style)}</h3>
+                    <p><strong>Zona:</strong> ${esc(quote.body_part)} | <strong>Tamaño:</strong> ${esc(quote.size_cm)} cm | <strong>Color:</strong> ${quote.is_color ? 'Sí' : 'No'}</p>
+                    <p><strong>Rango estimado:</strong> $${esc(quote.min_estimate)} - $${esc(quote.max_estimate)} CLP</p>
+                    <p><strong>Estado:</strong> <strong style="color: ${st.color};">${esc(st.text)}</strong></p>
+                    ${actions}
+                </div>`;
+        }
+
+        async function actualizarEstado(quoteId, nuevoEstado) {
+            try {
+                const res = await fetch(`${API}/quotes/${quoteId}/`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json', ...authHeader() },
+                    body: JSON.stringify({ status: nuevoEstado })
+                });
+                if (res.ok) {
+                    cargarCotizaciones();
+                } else {
+                    alert('Error al actualizar la cotización');
+                }
+            } catch (err) {
+                console.error('Error:', err);
+            }
+        }
+
+        /* ---------------- Portafolio ---------------- */
+
+        async function cargarPortafolio() {
+            const grid = $('portfolio-grid');
+            try {
+                const res = await fetch(`${API}/portfolio/`, { headers: authHeader() });
+                if (res.status === 401) { cerrarSesion(); return; }
+                if (!res.ok) throw new Error('http');
+
+                const data = await res.json();
+                if (data.length === 0) {
+                    grid.innerHTML = '<p class="muted" style="grid-column: 1 / -1; text-align: center;">Aún no subes fotos. Tu portafolio es lo primero que ven los clientes.</p>';
+                    return;
+                }
+
+                grid.innerHTML = data.map(item => `
+                    <div class="portfolio-item">
+                        <img src="${esc(item.image)}" alt="${esc(item.style)}" loading="lazy">
+                        <button class="del" title="Eliminar foto" onclick="borrarFoto(${Number(item.id)})">✕</button>
+                        <div class="meta">${esc(item.style)} · ${esc(item.body_part)}</div>
+                    </div>
+                `).join('');
+            } catch (err) {
+                grid.innerHTML = '<p class="muted" style="grid-column: 1 / -1; text-align: center;">No se pudo cargar el portafolio.</p>';
+            }
+        }
+
+        async function subirFoto() {
+            const file = $('pf_file').files[0];
+            const style = $('pf_style').value.trim();
+            const body = $('pf_body').value;
+            const msg = $('pf-msg');
+            const btn = $('pf-btn');
+            const fail = text => { msg.textContent = text; msg.style.display = 'block'; };
+
+            msg.style.display = 'none';
+            if (!file) return fail('Elige una foto.');
+            if (!ALLOWED_TYPES.includes(file.type)) return fail('Formato no permitido. Usa JPG, PNG o WebP.');
+            if (file.size > MAX_MB * 1024 * 1024) return fail(`La foto pesa más de ${MAX_MB} MB.`);
+            if (!style || !body) return fail('Indica el estilo y la zona del cuerpo.');
+
+            const form = new FormData();
+            form.append('image', file);
+            form.append('style', style);
+            form.append('body_part', body);
+
+            btn.disabled = true;
+            btn.textContent = 'Subiendo...';
+            try {
+                // Sin Content-Type: el navegador lo pone solo con el boundary del multipart
+                const res = await fetch(`${API}/portfolio/`, { method: 'POST', headers: authHeader(), body: form });
+                if (res.status === 401) { cerrarSesion(); return; }
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({}));
+                    const first = Object.values(err).flat()[0];
+                    return fail(typeof first === 'string' ? first : 'No se pudo subir la foto.');
+                }
+                $('pf_file').value = '';
+                $('pf_style').value = '';
+                $('pf_body').selectedIndex = 0;
+                cargarPortafolio();
+            } catch (err) {
+                fail('No se pudo conectar con el servidor.');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Subir foto';
+            }
+        }
+
+        async function borrarFoto(id) {
+            if (!confirm('¿Eliminar esta foto de tu portafolio?')) return;
+            try {
+                const res = await fetch(`${API}/portfolio/${id}/`, { method: 'DELETE', headers: authHeader() });
+                if (res.ok || res.status === 204) {
+                    cargarPortafolio();
+                } else {
+                    alert('No se pudo eliminar la foto.');
+                }
+            } catch (err) {
+                console.error('Error:', err);
+            }
+        }
+
+        function cerrarSesion() {
+            ['ink_token', 'client_token', 'client_name'].forEach(k => localStorage.removeItem(k));
+            window.location.href = 'index.html';
+        }
+    </script>
+</body>
+</html>
